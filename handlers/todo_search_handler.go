@@ -2,31 +2,41 @@ package handlers
 
 import (
 	"todo-search-service-go/elasticsearch"
-	"github.com/nats-io/go-nats"
 	"todo-service-go/events"
 	"github.com/golang/protobuf/proto"
 	"github.com/gocql/gocql"
 	"github.com/Sirupsen/logrus"
+	"github.com/nats-io/go-nats-streaming"
 )
 
 type TodoSearchHandler struct {
-	natsSession *nats.Conn
+	natsSession stan.Conn
 	es *elasticsearch.ElasticSearch
 }
 
-func NewTodoSearchHandler(natsSession *nats.Conn, es *elasticsearch.ElasticSearch) (*TodoSearchHandler, error) {
+var (
+	subscribeGroupName = "handler.todo-search"
+)
+
+func NewTodoSearchHandler(natsSession stan.Conn, es *elasticsearch.ElasticSearch) (*TodoSearchHandler, error) {
 	h := TodoSearchHandler{natsSession, es}
 
-	_, err := natsSession.Subscribe("todos.new", func(msg *nats.Msg) {
-		h.insertTodo(msg)
-	})
+	_, err := natsSession.QueueSubscribe("todos.new", subscribeGroupName, func(msg *stan.Msg) {
+		err := h.insertTodo(msg)
+		if err == nil {
+			msg.Ack()
+		}
+	}, stan.SetManualAckMode())
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = natsSession.Subscribe("todos.remove", func(msg *nats.Msg) {
-		h.deleteTodo(msg)
-	})
+	_, err = natsSession.QueueSubscribe("todos.remove", subscribeGroupName, func(msg *stan.Msg) {
+		err := h.deleteTodo(msg)
+		if err == nil {
+			msg.Ack()
+		}
+	}, stan.SetManualAckMode())
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +44,7 @@ func NewTodoSearchHandler(natsSession *nats.Conn, es *elasticsearch.ElasticSearc
 	return &h, nil
 }
 
-func (h *TodoSearchHandler) insertTodo(m *nats.Msg) error {
+func (h *TodoSearchHandler) insertTodo(m *stan.Msg) error {
 	event := events.TodoAdded{}
 	err := proto.Unmarshal(m.Data, &event)
 	if err != nil {
@@ -53,7 +63,7 @@ func (h *TodoSearchHandler) insertTodo(m *nats.Msg) error {
 	return nil
 }
 
-func (h *TodoSearchHandler) deleteTodo(m *nats.Msg) error {
+func (h *TodoSearchHandler) deleteTodo(m *stan.Msg) error {
 	event := events.TodoRemoved{}
 	err := proto.Unmarshal(m.Data, &event)
 	if err != nil {

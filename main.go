@@ -1,14 +1,14 @@
 package main
 
 import (
-	"github.com/gorilla/mux"
 	"net/http"
-	"github.com/nats-io/go-nats"
 	"os"
 	"todo-search-service-go/elasticsearch"
 	"gopkg.in/olivere/elastic.v5"
 	"todo-search-service-go/handlers"
 	"github.com/Sirupsen/logrus"
+	"github.com/nats-io/go-nats-streaming"
+	"todo-search-service-go/api"
 )
 
 func init() {
@@ -17,17 +17,20 @@ func init() {
 	logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 }
 
+const natsClientName = "service_todo-search"
+const natsClusterName = "test-cluster"
+
 func main() {
 	// Start NATS client
 	natsUrl := os.Getenv("NATS_URL")
 	if natsUrl == "" {
-		natsUrl = nats.DefaultURL
+		natsUrl = stan.DefaultNatsURL
 	}
-	natsSession, err := nats.Connect(natsUrl)
+	natsSession, err := stan.Connect(natsClusterName, natsClientName, stan.NatsURL(natsUrl))
 	if err != nil {
 		panic(err)
 	}
-	logrus.Println("Initialized NATS")
+	logrus.Info("Initialized NATS streaming")
 	defer natsSession.Close()
 
 	// Start ElasticSearch client
@@ -46,18 +49,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	logrus.Info("Initialized Handlers")
 
-	// Start router
-	router := mux.NewRouter()
-	apiRouter:= router.PathPrefix("/api/v1").Subrouter().StrictSlash(true)
-	apiRouter.HandleFunc("/", healthCheck)
-	logrus.Println("Initialized API")
+	// Start api
+	a := api.NewApi()
 
-	logrus.Fatal(http.ListenAndServe(":8080", router))
-}
-
-func healthCheck(w http.ResponseWriter, req *http.Request) {
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"ok": true}`))
+	logrus.Fatal(http.ListenAndServe(":8080", a.Router))
 }
